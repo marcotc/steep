@@ -594,11 +594,43 @@ module Steep
             type_case_select0(ty, klass)
           end
 
-        when AST::Types::Any, AST::Types::Top, AST::Types::Var
+        when AST::Types::Any, AST::Types::Top
           [
             [instance_type],
             [type]
           ]
+
+        when AST::Types::Var
+          # For generic type variables, we need to handle them carefully to preserve the generic relationship
+          # while understanding constraint implications from is_a? checks.
+          if upper_bound = config&.upper_bound(type.name)
+            # If the type variable has an upper bound constraint (e.g., T < Object),
+            # check if the is_a? check would be valid for the upper bound.
+            upper_bound_truthy, _upper_bound_falsy = type_case_select0(upper_bound, klass)
+            
+            if !upper_bound_truthy.empty?
+              # If the upper bound can satisfy the is_a? check, then T can potentially
+              # be the target type at runtime. We preserve T in both branches to maintain
+              # the generic relationship while allowing the narrowing to inform other logic.
+              [
+                [type], # Keep the type variable T in truthy branch
+                [type]  # Keep T in falsy branch (T could be any type satisfying the constraint)
+              ]
+            else
+              # If the upper bound cannot satisfy the is_a? check, then T is incompatible
+              # with the target type due to constraint violations, so T only appears in falsy branch.
+              [
+                [],     # Empty truthy branch - T cannot be the target type
+                [type]  # T only in falsy branch
+              ]
+            end
+          else
+            # No upper bound information available, fall back to the original logic
+            [
+              [instance_type],
+              [type]
+            ]
+          end
 
         when AST::Types::Name::Interface
           [

@@ -477,4 +477,74 @@ type dm = ms | ds
                    interpreter.type_case_select(parse_type("::dm"), RBS::TypeName.parse("::D2"))
     end
   end
+
+  def test_type_case_select_generic_var_with_upper_bound
+    with_checker do |checker|
+      # Test generic type variable with upper bound constraint
+      var_type = AST::Types::Var.new(name: :T)
+      
+      # Config with upper bound T < Object
+      config_with_bounds = Interface::Builder::Config.new(
+        self_type: AST::Builtin::Object.instance_type,
+        class_type: nil,
+        instance_type: nil,
+        variable_bounds: { T: AST::Builtin::Object.instance_type }
+      )
+
+      interpreter = LogicTypeInterpreter.new(subtyping: checker, typing: nil, config: config_with_bounds)
+
+      # For T with upper bound Object, T.is_a?(String) should preserve T in both branches
+      # since T could potentially be String (satisfying the upper bound constraint)
+      truthy_type, falsy_type = interpreter.type_case_select(var_type, RBS::TypeName.parse("::String"))
+      
+      assert_equal var_type, truthy_type, "Truthy branch should preserve type variable T"
+      assert_equal var_type, falsy_type, "Falsy branch should preserve type variable T"
+    end
+  end
+
+  def test_type_case_select_generic_var_without_upper_bound
+    with_checker do |checker|
+      # Test generic type variable without upper bound constraint
+      var_type = AST::Types::Var.new(name: :T)
+      
+      # Config without upper bounds
+      config_without_bounds = Interface::Builder::Config.new(
+        self_type: AST::Builtin::Object.instance_type,
+        class_type: nil,
+        instance_type: nil,
+        variable_bounds: {}
+      )
+
+      interpreter = LogicTypeInterpreter.new(subtyping: checker, typing: nil, config: config_without_bounds)
+
+      # For T without upper bound info, should fall back to original logic
+      truthy_type, falsy_type = interpreter.type_case_select(var_type, RBS::TypeName.parse("::String"))
+      
+      assert_equal parse_type("::String"), truthy_type, "Truthy branch should be String (fallback logic)"
+      assert_equal var_type, falsy_type, "Falsy branch should preserve type variable T"
+    end
+  end
+
+  def test_type_case_select_generic_var_incompatible_constraint
+    with_checker do |checker|
+      # Test generic type variable with incompatible upper bound constraint
+      var_type = AST::Types::Var.new(name: :T)
+      
+      # Config with upper bound T < Integer (incompatible with String)
+      config_with_incompatible_bounds = Interface::Builder::Config.new(
+        self_type: AST::Builtin::Object.instance_type,
+        class_type: nil,
+        instance_type: nil,
+        variable_bounds: { T: parse_type("::Integer") }
+      )
+
+      interpreter = LogicTypeInterpreter.new(subtyping: checker, typing: nil, config: config_with_incompatible_bounds)
+
+      # For T < Integer, T.is_a?(String) should be impossible (empty truthy branch)
+      truthy_type, falsy_type = interpreter.type_case_select(var_type, RBS::TypeName.parse("::String"))
+      
+      assert_nil truthy_type, "Truthy branch should be empty - T constrained to Integer cannot be String"
+      assert_equal var_type, falsy_type, "Falsy branch should preserve type variable T"
+    end
+  end
 end
